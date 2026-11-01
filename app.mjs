@@ -37,8 +37,7 @@ async function run(selected, persist) {
   try {
     const {legs, results} = await openPair(api, selected);
     if (persist) {
-      saved = {port:Number($('instance').value), docs:legs.map(x => x.doc.externalId), connections:{...(saved?.connections || {})}};
-      legs.forEach(x => { saved.connections[x.venue] = x.connectionId; });
+      saved = saveSetup(Number($('instance').value), legs, saved?.connections);
       try { localStorage.setItem(storageKey, JSON.stringify(saved)); } catch { status('Настройка браузером не сохранена.'); }
     }
     let message = results.map((r, i) => {
