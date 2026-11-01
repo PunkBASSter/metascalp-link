@@ -73,3 +73,15 @@ test('polling failures remain visible in unconfirmed results', async () => {
   }, legs, {attempts:2, delay:()=>Promise.resolve()});
   assert.deepEqual(results.map(r => r.pollError), ['offline', 'offline']);
 });
+
+test('saved choices remain separate for two sides of the same venue', async () => {
+  const {saveSetup, savedSelections} = await import('./bridge.mjs');
+  const legs = [
+    {side:'long', venue:'BYBIT-LINEAR', connectionId:4, doc:{externalId:ids[0]}},
+    {side:'short', venue:'BYBIT-LINEAR', connectionId:6, doc:{externalId:ids[1]}}
+  ];
+  const saved = saveSetup(17845, legs, {});
+  const selections = savedSelections(saved, legs.map(({side, venue}) => ({side, venue, ticker:'BTCUSDT'})));
+  assert.deepEqual(selections.map(x => x.connectionId), [4, 6]);
+  assert.deepEqual(selections.map(x => x.docId), ids);
+});

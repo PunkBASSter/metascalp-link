@@ -97,3 +97,12 @@ export async function openPair(api, selected, options) {
   const legs = await preparePair(api, selected);
   return {legs, results:await applyPair(api, legs, options)};
 }
+
+export function saveSetup(port, legs, connections = {}) {
+  const saved = {port, docs:legs.map(x => x.doc.externalId), connections:{...connections}};
+  legs.forEach(x => { saved.connections[`${x.side}:${x.venue}`] = x.connectionId; });
+  return saved;
+}
+export function savedSelections(saved, request) {
+  return request.map((x, i) => ({...x, docId:saved.docs[i], connectionId:saved.connections?.[`${x.side}:${x.venue}`]}));
+}

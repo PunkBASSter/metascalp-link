@@ -1,4 +1,4 @@
-import {apiClient, candidates, discover, documents, openPair} from './bridge.mjs';
+import {apiClient, candidates, discover, documents, openPair, saveSetup, savedSelections} from './bridge.mjs';
 const $ = id => document.getElementById(id);
 const params = new URLSearchParams(location.hash.slice(1));
 const request = ['long', 'short'].map(side => ({
@@ -6,7 +6,8 @@ const request = ['long', 'short'].map(side => ({
 }));
 const valid = request.every(x => x.venue && x.ticker && /^[A-Z0-9-]+$/.test(x.venue) && /^[A-Za-z0-9_\/-]+$/.test(x.ticker));
 const status = message => $('status').textContent = message;
-const storageKey = 'metascalp-setup-v1';
+const storageKey = 'metascalp-setup';
+window.addEventListener('hashchange', () => location.reload());
 let saved;
 try { saved = JSON.parse(localStorage.getItem(storageKey) || 'null'); } catch { saved = null; }
 let api;
@@ -73,7 +74,7 @@ async function connect() {
     $('setup').hidden = false;
     if (found.length === 1 && saved?.port === found[0].port && saved?.docs?.length === 2) {
       api = apiClient(found[0].port);
-      const selected = request.map((x, i) => ({...x, docId:saved.docs[i], connectionId:saved.connections?.[x.venue]}));
+      const selected = savedSelections(saved, request);
       await run(selected, false);
     } else status(found.length > 1 ? 'Найдено несколько экземпляров. Выберите нужный.' : 'MetaScalp найден. Настройте два стакана.');
   }
@@ -106,7 +107,7 @@ $('load').onclick = async () => {
       const heading = document.createElement('h2');
       heading.textContent = `${leg.side === 'long' ? 'Long' : 'Short'} · ${leg.venue} · ${leg.ticker}`;
       section.append(heading);
-      const chosen = saved?.port === Number($('instance').value) ? saved.connections?.[leg.venue] : null;
+      const chosen = saved?.port === Number($('instance').value) ? saved.connections?.[`${leg.side}:${leg.venue}`] : null;
       section.append(makeSelect(`${leg.side}Connection`, 'Подключение', conns.map(c => ({value:c.Id, text:c.Name})), chosen || (conns.length === 1 ? conns[0].Id : '')));
       section.append(makeSelect(`${leg.side}Doc`, 'Стакан', docs.map((d, i) => ({value:d.externalId, text:`Стакан ${i + 1} · ${d.tabName || 'вкладка'} · ${d.ticker || 'без тикера'}`})), saved?.port === Number($('instance').value) ? saved.docs?.[leg.side === 'long' ? 0 : 1] : ''));
       $('choices').append(section);
