@@ -13,7 +13,7 @@ test('page saves separate Long and Short connection selections', async () => {
   for (const id of ['request','connect','status','setup','instance','load','choices','apply']) elements.set(id, new Element());
   globalThis.document = {getElementById:id => elements.get(id), createElement:() => new Element()};
   globalThis.window = {addEventListener(){}};
-  globalThis.location = {hash:'#longVenue=BYBIT-LINEAR&longTicker=BTCUSDT&shortVenue=BYBIT-LINEAR&shortTicker=BTCUSDT', reload(){}};
+  globalThis.location = {hash:'#longExchangeId=4&longExchangeId=6&longMarketType=2&longTicker=BTCUSDT&longLabel=Bybit&shortExchangeId=4&shortExchangeId=6&shortMarketType=2&shortTicker=BTCUSDT&shortLabel=Bybit', reload(){}};
   let stored;
   globalThis.localStorage = {getItem:() => null, setItem:(key,value) => {stored = JSON.parse(value);}};
   const ids = ['11111111-1111-1111-1111-111111111111','22222222-2222-2222-2222-222222222222'];
@@ -41,6 +41,6 @@ test('page saves separate Long and Short connection selections', async () => {
   elements.get('longDoc').value = ids[0];
   elements.get('shortDoc').value = ids[1];
   await elements.get('apply').onclick();
-  assert.equal(stored.connections['long:BYBIT-LINEAR'],4);
-  assert.equal(stored.connections['short:BYBIT-LINEAR'],6);
+  assert.equal(Object.entries(stored.connections).find(([k]) => k.startsWith('long:'))[1],4);
+  assert.equal(Object.entries(stored.connections).find(([k]) => k.startsWith('short:'))[1],6);
 });

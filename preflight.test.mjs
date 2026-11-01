@@ -4,8 +4,8 @@ import { preparePair, openPair } from './bridge.mjs';
 
 const ids = ['11111111-1111-1111-1111-111111111111', '22222222-2222-2222-2222-222222222222'];
 const request = [
-  {venue:'GATEIO-FUTURES', ticker:'POWR_USDT', docId:ids[0]},
-  {venue:'BINANCE-FUTURES', ticker:'POWRUSDT', docId:ids[1]}
+  {exchangeIds:[3], marketTypes:[2,5], tickers:['POWR_USDT'], label:'Gate USDT', docId:ids[0]},
+  {exchangeIds:[2], marketTypes:[2], tickers:['POWRUSDT'], label:'Binance USDT', docId:ids[1]}
 ];
 function fixture() {
   const docs = ids.map(externalId => ({externalId, kind:'orderBook', linkNumber:9999, connectionId:0, ticker:'OLD'}));
@@ -44,7 +44,7 @@ test('ambiguous connections and stale, linked, duplicate or separate documents r
     if (mode === 'linked') f.docs[0].linkNumber = 3;
     if (mode === 'duplicate') legs[1].docId = legs[0].docId;
     if (mode === 'separate') f.state.windows[0].tabs.push({id:4,documents:[f.state.windows[0].tabs[0].documents.pop()]});
-    if (mode === 'missing') legs[0].ticker = 'MISSING';
+    if (mode === 'missing') legs[0].tickers = ['MISSING'];
     await assert.rejects(() => openPair(f.api, legs));
     assert.equal(f.writes.length,0,mode);
   }
@@ -55,13 +55,6 @@ test('a previously chosen ambiguous connection must remain eligible', async () =
   await assert.rejects(() => preparePair(f.api, [{...request[0],connectionId:9},request[1]]));
   const legs = await preparePair(f.api, [{...request[0],connectionId:1},request[1]]);
   assert.equal(legs[0].connectionId,1);
-});
-test('only known venue ticker aliases are accepted', async () => {
-  const {resolveTicker} = await import('./bridge.mjs');
-  assert.equal(resolveTicker([{Name:'POWR-USDT-SWAP'}], 'POWR_USDT', 'OKX-SWAP'), 'POWR-USDT-SWAP');
-  assert.equal(resolveTicker([{Name:'XBTUSDTM'}], 'BTCUSDT', 'KUCOIN-LINEAR'), 'XBTUSDTM');
-  assert.throws(() => resolveTicker([{Name:'BTCUSDTM'}], 'BTCUSDT', 'BINANCE-FUTURES'));
-  assert.throws(() => resolveTicker([{Name:'BTCUSDTM'}, {Name:'XBTUSDTM'}], 'BTCUSDT', 'KUCOIN-LINEAR'));
 });
 test('polling failures remain visible in unconfirmed results', async () => {
   const {applyPair} = await import('./bridge.mjs');
@@ -77,11 +70,11 @@ test('polling failures remain visible in unconfirmed results', async () => {
 test('saved choices remain separate for two sides of the same venue', async () => {
   const {saveSetup, savedSelections} = await import('./bridge.mjs');
   const legs = [
-    {side:'long', venue:'BYBIT-LINEAR', connectionId:4, doc:{externalId:ids[0]}},
-    {side:'short', venue:'BYBIT-LINEAR', connectionId:6, doc:{externalId:ids[1]}}
+    {side:'long', exchangeIds:[4,6], marketTypes:[2,5], connectionId:4, doc:{externalId:ids[0]}},
+    {side:'short', exchangeIds:[4,6], marketTypes:[2,5], connectionId:6, doc:{externalId:ids[1]}}
   ];
   const saved = saveSetup(17845, legs, {});
-  const selections = savedSelections(saved, legs.map(({side, venue}) => ({side, venue, ticker:'BTCUSDT'})));
+  const selections = savedSelections(saved, legs.map(({side, exchangeIds, marketTypes}) => ({side, exchangeIds, marketTypes, tickers:['BTCUSDT']})));
   assert.deepEqual(selections.map(x => x.connectionId), [4, 6]);
   assert.deepEqual(selections.map(x => x.docId), ids);
 });

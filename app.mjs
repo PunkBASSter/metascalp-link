@@ -1,10 +1,8 @@
-import {apiClient, candidates, discover, documents, openPair, saveSetup, savedSelections} from './bridge.mjs';
+import {apiClient, candidates, discover, documents, openPair, saveSetup, savedSelections, parseRequest, targetKey} from './bridge.mjs';
 const $ = id => document.getElementById(id);
-const params = new URLSearchParams(location.hash.slice(1));
-const request = ['long', 'short'].map(side => ({
-  side, venue:params.get(`${side}Venue`), ticker:params.get(`${side}Ticker`)
-}));
-const valid = request.every(x => x.venue && x.ticker && /^[A-Z0-9-]+$/.test(x.venue) && /^[A-Za-z0-9_\/-]+$/.test(x.ticker));
+let request = [];
+try { request = parseRequest(location.hash); } catch { /* invalid link is displayed below */ }
+const valid = request.length === 2;
 const status = message => $('status').textContent = message;
 const storageKey = 'metascalp-setup';
 window.addEventListener('hashchange', () => location.reload());
@@ -29,7 +27,7 @@ function makeSelect(id, title, items, chosen) {
   return wrapper;
 }
 $('request').textContent = valid
-  ? request.map(x => `${x.side === 'long' ? 'Long' : 'Short'}: ${x.venue} · ${x.ticker}`).join('  |  ')
+  ? request.map(x => `${x.side === 'long' ? 'Long' : 'Short'}: ${x.label} · ${x.tickers[0]}`).join('  |  ')
   : 'Откройте ссылку из Telegram: нужны площадки и тикеры для Long и Short.';
 $('connect').disabled = !valid;
 async function run(selected, persist) {
@@ -43,7 +41,7 @@ async function run(selected, persist) {
     let message = results.map((r, i) => {
       const detail = r.confirmed ? 'подтверждён' : r.error ? `ошибка отправки: ${r.error}`
         : `изменение не подтверждено${r.pollError ? `: ${r.pollError}` : ''}; проверьте MetaScalp`;
-      return `${i ? 'Short' : 'Long'}: ${detail}`;
+      return `${i ? 'Short' : 'Long'} · ${legs[i].connection.Exchange || ''} ${legs[i].connection.Market || ''} · ${legs[i].ticker}: ${detail}`;
     }).join('\n');
     if (results.every(r => r.confirmed)) {
       try {
@@ -95,18 +93,20 @@ $('load').onclick = async () => {
   status('Проверяем подключения и стаканы…');
   try {
     const [inventory, state] = await Promise.all([api('/api/connections'), api('/api/ui/state')]);
+    const missing = request.filter(leg => !candidates(inventory.connections, leg).length);
+    if (missing.length) throw Error(`Нет активного подключения: ${missing.map(x => x.label).join(', ')}. Подключите биржи в MetaScalp, затем откройте два несвязанных стакана на одной вкладке.`);
     const docs = documents(state);
     if (!docs.some((a, i) => docs.some((b, j) => i !== j && a.windowId === b.windowId && a.tabId === b.tabId)))
-      throw Error('Создайте два отдельных несвязанных стакана на одной вкладке.');
+      throw Error('Создайте два отдельных несвязанных стакана на одной вкладке. Если стаканы уже открыты, отключите их связь с группами.');
     for (const leg of request) {
-      const conns = candidates(inventory.connections, leg.venue);
-      if (!conns.length) throw Error(`${leg.venue}: активное подключение не найдено.`);
+      const conns = candidates(inventory.connections, leg);
+      if (!conns.length) throw Error(`${leg.label}: активное подключение не найдено.`);
       const section = document.createElement('div');
       section.className = 'leg';
       const heading = document.createElement('h2');
-      heading.textContent = `${leg.side === 'long' ? 'Long' : 'Short'} · ${leg.venue} · ${leg.ticker}`;
+      heading.textContent = `${leg.side === 'long' ? 'Long' : 'Short'} · ${leg.label} · ${leg.tickers[0]}`;
       section.append(heading);
-      const chosen = saved?.port === Number($('instance').value) ? saved.connections?.[`${leg.side}:${leg.venue}`] : null;
+      const chosen = saved?.port === Number($('instance').value) ? saved.connections?.[targetKey(leg)] : null;
       section.append(makeSelect(`${leg.side}Connection`, 'Подключение', conns.map(c => ({value:c.Id, text:c.Name})), chosen || (conns.length === 1 ? conns[0].Id : '')));
       section.append(makeSelect(`${leg.side}Doc`, 'Стакан', docs.map((d, i) => ({value:d.externalId, text:`Стакан ${i + 1} · ${d.tabName || 'вкладка'} · ${d.ticker || 'без тикера'}`})), saved?.port === Number($('instance').value) ? saved.docs?.[leg.side === 'long' ? 0 : 1] : ''));
       $('choices').append(section);

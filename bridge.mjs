@@ -1,31 +1,34 @@
-const venues = {
-  'BINANCE-SPOT': [[2], [0]], 'BINANCE-FUTURES': [[2], [2]],
-  'BYBIT-SPOT': [[4, 6], [0]], 'BYBIT-LINEAR': [[4, 6], [2, 5]],
-  'OKX-SPOT': [[10], [0]], 'OKX-SWAP': [[10], [2, 5]],
-  'BITGET-LINEAR': [[7], [2, 5]], 'GATEIO-SPOT': [[3], [0]],
-  'GATEIO-FUTURES': [[3], [2, 5]], 'KUCOIN-SPOT': [[5], [0]],
-  'KUCOIN-LINEAR': [[5], [2, 5]]
-};
-export function candidates(items, venue) {
-  const entry = venues[venue];
-  if (!entry) throw Error(`Неподдерживаемая площадка: ${venue}`);
-  return items.filter(c => c.State === 2 && entry[0].includes(c.ExchangeId) && entry[1].includes(c.MarketType));
+export function parseRequest(hash) {
+  const params = new URLSearchParams(hash.startsWith('#') ? hash.slice(1) : hash);
+  return ['long', 'short'].map(side => {
+    const readIds = (suffix, min) => {
+      const values = params.getAll(`${side}${suffix}`);
+      if (!values.length || values.length > 16 || values.some(x => !/^(0|[1-9]\d{0,2})$/.test(x) || Number(x) < min))
+        throw Error('Некорректные данные ссылки.');
+      return [...new Set(values.map(Number))];
+    };
+    const exchangeIds = readIds('ExchangeId', 1);
+    const marketTypes = readIds('MarketType', 0);
+    const tickers = params.getAll(`${side}Ticker`);
+    const labels = params.getAll(`${side}Label`);
+    if (!tickers.length || tickers.length > 32 || tickers.some(x => !x || x.length > 128 || /[\x00-\x1f\x7f]/.test(x)) ||
+        labels.length !== 1 || !labels[0].trim() || labels[0].length > 120 || /[\x00-\x1f\x7f]/.test(labels[0]))
+      throw Error('Некорректные данные ссылки.');
+    return {side, exchangeIds, marketTypes, tickers, label:labels[0]};
+  });
 }
-const normalized = value => value.toUpperCase().replace(/[-_/]/g, '');
-function tickerKey(value, venue) {
-  let key = normalized(value);
-  if (venue === 'OKX-SWAP') key = key.replace(/SWAP$/, '');
-  if (venue === 'KUCOIN-LINEAR') {
-    key = key.replace(/USDTM$/, 'USDT');
-    if (key === 'XBTUSDT') key = 'BTCUSDT';
-  }
-  return key;
+export function candidates(items, target) {
+  return items.filter(c => c.State === 2 && target.exchangeIds.includes(c.ExchangeId) && target.marketTypes.includes(c.MarketType));
 }
-export function resolveTicker(items, wanted, venue = '') {
-  const exact = items.filter(t => typeof t.Name === 'string' && t.Name.toUpperCase() === wanted.toUpperCase());
-  const matches = exact.length ? exact : items.filter(t => typeof t.Name === 'string' && tickerKey(t.Name, venue) === tickerKey(wanted, venue));
-  if (matches.length !== 1) throw Error(matches.length ? `Неоднозначный тикер ${wanted}` : `Тикер ${wanted} не найден`);
+export function resolveTicker(items, literals) {
+  const names = new Set(literals.map(x => x.toUpperCase()));
+  const matches = items.filter(t => typeof t.Name === 'string' && names.has(t.Name.toUpperCase()));
+  if (matches.length !== 1) throw Error(matches.length ? 'Неоднозначный тикер' : 'Тикер не найден');
   return matches[0].Name;
+}
+export function targetKey(item) {
+  const ids = xs => [...new Set(xs)].sort((a, b) => a - b).join(',');
+  return `${item.side}:${ids(item.exchangeIds)}:${ids(item.marketTypes)}`;
 }
 const guid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export function documents(state) {
@@ -60,19 +63,19 @@ export async function preparePair(api, selected) {
   const [inventory, state] = await Promise.all([api('/api/connections'), api('/api/ui/state')]);
   const docs = documents(state);
   const chosen = selected.map(item => {
-    const possible = candidates(inventory.connections, item.venue);
+    const possible = candidates(inventory.connections, item);
     let connection;
     if (item.connectionId) connection = possible.find(c => c.Id === item.connectionId);
     else if (possible.length === 1) connection = possible[0];
-    if (!connection) throw Error(`${item.venue}: выберите доступное подключение.`);
+    if (!connection) throw Error(`${item.label}: выберите доступное подключение.`);
     const doc = docs.find(d => d.externalId === item.docId);
     if (!doc) throw Error('Сохранённый стакан не найден или связан. Выберите стаканы заново.');
-    return {...item, connectionId:connection.Id, doc};
+    return {...item, connectionId:connection.Id, connection, doc};
   });
   if (chosen[0].doc.windowId !== chosen[1].doc.windowId || chosen[0].doc.tabId !== chosen[1].doc.tabId)
     throw Error('Стаканы должны находиться на одной вкладке.');
   const tickerLists = await Promise.all(chosen.map(x => api(`/api/connections/${x.connectionId}/tickers`)));
-  return chosen.map((item, i) => ({...item, ticker:resolveTicker(tickerLists[i].tickers, item.ticker, item.venue)}));
+  return chosen.map((item, i) => ({...item, ticker:resolveTicker(tickerLists[i].tickers, item.tickers)}));
 }
 export async function applyPair(api, legs, {attempts = 8, delay = () => new Promise(r => setTimeout(r, 400))} = {}) {
   const sent = await Promise.allSettled(legs.map(leg => api(`/api/ui/documents/${leg.doc.externalId}/ticker`, {
@@ -100,9 +103,9 @@ export async function openPair(api, selected, options) {
 
 export function saveSetup(port, legs, connections = {}) {
   const saved = {port, docs:legs.map(x => x.doc.externalId), connections:{...connections}};
-  legs.forEach(x => { saved.connections[`${x.side}:${x.venue}`] = x.connectionId; });
+  legs.forEach(x => { saved.connections[targetKey(x)] = x.connectionId; });
   return saved;
 }
 export function savedSelections(saved, request) {
-  return request.map((x, i) => ({...x, docId:saved.docs[i], connectionId:saved.connections?.[`${x.side}:${x.venue}`]}));
+  return request.map((x, i) => ({...x, docId:saved.docs[i], connectionId:saved.connections?.[targetKey(x)]}));
 }
