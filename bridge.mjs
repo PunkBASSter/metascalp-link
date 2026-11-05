@@ -31,10 +31,17 @@ export function targetKey(item) {
   return `${item.side}:${ids(item.exchangeIds)}:${ids(item.marketTypes)}`;
 }
 const guid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-export function documents(state) {
+const linked = doc => Number.isInteger(doc.linkNumber) && doc.linkNumber > 0 && doc.linkNumber !== 9999;
+function panels(state) {
   return (state.windows || []).flatMap(w => (w.tabs || []).flatMap(t => (t.documents || [])
-    .filter(d => d.kind === 'orderBook' && [null, 0, 9999].includes(d.linkNumber) && guid.test(d.externalId))
+    .filter(d => typeof d.externalId === 'string' && guid.test(d.externalId))
     .map(d => ({...d, windowId:w.id, tabId:t.id, tabName:t.name}))));
+}
+export function documents(state) {
+  return panels(state).filter(d => d.kind === 'orderBook' && linked(d));
+}
+export function linkedPanels(state, doc) {
+  return panels(state).filter(d => d.linkNumber === doc.linkNumber && d.externalId !== doc.externalId);
 }
 export function apiClient(port, fetcher = fetch) {
   if (!Number.isInteger(port) || port < 17845 || port > 17855) throw Error('Недопустимый порт');
@@ -74,22 +81,31 @@ export async function preparePair(api, selected) {
   });
   if (chosen[0].doc.windowId !== chosen[1].doc.windowId || chosen[0].doc.tabId !== chosen[1].doc.tabId)
     throw Error('Стаканы должны находиться на одной вкладке.');
+  if (chosen[0].doc.linkNumber === chosen[1].doc.linkNumber)
+    throw Error('Стаканы связаны в одну группу: смена тикера одного переключит другой. Выберите стаканы из разных групп.');
   const tickerLists = await Promise.all(chosen.map(x => api(`/api/connections/${x.connectionId}/tickers`)));
-  return chosen.map((item, i) => ({...item, ticker:resolveTicker(tickerLists[i].tickers, item.tickers)}));
+  return chosen.map((item, i) => ({...item, linked:linkedPanels(state, item.doc), ticker:resolveTicker(tickerLists[i].tickers, item.tickers)}));
 }
 export async function applyPair(api, legs, {attempts = 8, delay = () => new Promise(r => setTimeout(r, 400))} = {}) {
-  const sent = await Promise.allSettled(legs.map(leg => api(`/api/ui/documents/${leg.doc.externalId}/ticker`, {
+  const targets = leg => [leg.doc, ...(leg.linked || [])];
+  const sent = await Promise.all(legs.map(leg => Promise.allSettled(targets(leg).map(d => api(`/api/ui/documents/${d.externalId}/ticker`, {
     method:'PUT', body:JSON.stringify({ticker:leg.ticker, connectionId:leg.connectionId})
-  })));
-  const results = sent.map(r => r.status === 'fulfilled' ? {confirmed:false} : {confirmed:false, error:String(r.reason?.message || r.reason)});
+  })))));
+  const results = sent.map(leg => {
+    const failed = leg.filter(r => r.status === 'rejected');
+    return failed.length ? {confirmed:false, error:String(failed[0].reason?.message || failed[0].reason)} : {confirmed:false};
+  });
   let pollError;
   for (let i = 0; i < attempts && results.some(r => !r.error && !r.confirmed); i++) {
     await delay();
     try {
-      const current = documents(await api('/api/ui/state'));
+      const current = panels(await api('/api/ui/state'));
       legs.forEach((leg, n) => {
-        const d = current.find(x => x.externalId === leg.doc.externalId);
-        if (!results[n].error && d?.connectionId === leg.connectionId && d.ticker === leg.ticker) results[n].confirmed = true;
+        const moved = targets(leg).every(t => {
+          const d = current.find(x => x.externalId === t.externalId);
+          return d?.connectionId === leg.connectionId && d.ticker === leg.ticker;
+        });
+        if (!results[n].error && moved) results[n].confirmed = true;
       });
     } catch (e) { pollError = e.message; }
   }

@@ -17,7 +17,7 @@ test('page saves separate Long and Short connection selections', async () => {
   let stored;
   globalThis.localStorage = {getItem:() => null, setItem:(key,value) => {stored = JSON.parse(value);}};
   const ids = ['11111111-1111-1111-1111-111111111111','22222222-2222-2222-2222-222222222222'];
-  const docs = ids.map(externalId => ({externalId,kind:'orderBook',linkNumber:9999,ticker:'OLD'}));
+  const docs = ids.map((externalId, i) => ({externalId,kind:'orderBook',linkNumber:2 + i,ticker:'OLD'}));
   const connections = [4,6].map(Id => ({Id,Name:`connection ${Id}`,ExchangeId:4,MarketType:2,State:2}));
   globalThis.fetch = async (url, options) => {
     const parsed = new URL(url);

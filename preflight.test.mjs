@@ -8,7 +8,7 @@ const request = [
   {exchangeIds:[2], marketTypes:[2], tickers:['POWRUSDT'], label:'Binance USDT', docId:ids[1]}
 ];
 function fixture() {
-  const docs = ids.map(externalId => ({externalId, kind:'orderBook', linkNumber:9999, connectionId:0, ticker:'OLD'}));
+  const docs = ids.map((externalId, i) => ({externalId, kind:'orderBook', linkNumber:2 + i, connectionId:0, ticker:'OLD'}));
   const state = {windows:[{id:1, tabs:[{id:3, documents:docs}]}]};
   const connections = [{Id:1, ExchangeId:3, MarketType:2, State:2}, {Id:2, ExchangeId:2, MarketType:2, State:2}];
   const writes = [];
@@ -35,13 +35,14 @@ test('preflight and exact writes confirm delayed state', async () => {
   assert.deepEqual(results.map(r => r.confirmed), [true,true]);
   assert.deepEqual(f.writes.map(x=>x[1]), [{ticker:'POWR_USDT',connectionId:1},{ticker:'POWRUSDT',connectionId:2}]);
 });
-test('ambiguous connections and stale, linked, duplicate or separate documents refuse before writes', async () => {
-  for (const mode of ['ambiguous','stale','linked','duplicate','separate','missing']) {
+test('ambiguous connections and stale, same-group, duplicate or separate documents refuse before writes', async () => {
+  for (const mode of ['ambiguous','unlinked','stale','sameGroup','duplicate','separate','missing']) {
     const f = fixture();
     let legs = structuredClone(request);
     if (mode === 'ambiguous') f.connections.push({Id:4,ExchangeId:3,MarketType:5,State:2});
+    if (mode === 'unlinked') f.docs[0].linkNumber = null;
     if (mode === 'stale') legs[0].docId = '33333333-3333-3333-3333-333333333333';
-    if (mode === 'linked') f.docs[0].linkNumber = 3;
+    if (mode === 'sameGroup') f.docs[1].linkNumber = 2;
     if (mode === 'duplicate') legs[1].docId = legs[0].docId;
     if (mode === 'separate') f.state.windows[0].tabs.push({id:4,documents:[f.state.windows[0].tabs[0].documents.pop()]});
     if (mode === 'missing') legs[0].tickers = ['MISSING'];
@@ -77,4 +78,12 @@ test('saved choices remain separate for two sides of the same venue', async () =
   const selections = savedSelections(saved, legs.map(({side, exchangeIds, marketTypes}) => ({side, exchangeIds, marketTypes, tickers:['BTCUSDT']})));
   assert.deepEqual(selections.map(x => x.connectionId), [4, 6]);
   assert.deepEqual(selections.map(x => x.docId), ids);
+});
+
+test('books in two different link groups are accepted and carry their group panels', async () => {
+  const f = fixture();
+  f.docs[0].linkNumber = 3; f.docs[1].linkNumber = 4;
+  f.state.windows[0].tabs[0].documents.push({externalId:'77777777-7777-7777-7777-777777777777', kind:'chart', linkNumber:3, ticker:'OLD'});
+  const legs = await preparePair(f.api, request);
+  assert.deepEqual(legs.map(x => x.linked.map(d => d.externalId)), [['77777777-7777-7777-7777-777777777777'], []]);
 });

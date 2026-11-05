@@ -94,10 +94,10 @@ $('load').onclick = async () => {
   try {
     const [inventory, state] = await Promise.all([api('/api/connections'), api('/api/ui/state')]);
     const missing = request.filter(leg => !candidates(inventory.connections, leg).length);
-    if (missing.length) throw Error(`Нет активного подключения: ${missing.map(x => x.label).join(', ')}. Подключите биржи в MetaScalp, затем откройте два несвязанных стакана на одной вкладке.`);
+    if (missing.length) throw Error(`Нет активного подключения: ${missing.map(x => x.label).join(', ')}. Подключите биржи в MetaScalp, затем откройте два стакана на одной вкладке.`);
     const docs = documents(state);
     if (!docs.some((a, i) => docs.some((b, j) => i !== j && a.windowId === b.windowId && a.tabId === b.tabId)))
-      throw Error('Создайте два отдельных несвязанных стакана на одной вкладке. Если стаканы уже открыты, отключите их связь с группами.');
+      throw Error('Нужны два стакана на одной вкладке, каждый со связью: MetaScalp по API переключает только связанные стаканы. Включите связь иконкой цепочки, у Long и Short — разные группы, затем проверьте ещё раз.');
     for (const leg of request) {
       const conns = candidates(inventory.connections, leg);
       if (!conns.length) throw Error(`${leg.label}: активное подключение не найдено.`);
@@ -112,7 +112,7 @@ $('load').onclick = async () => {
       $('choices').append(section);
     }
     $('apply').hidden = false;
-    status('Выберите два разных стакана на одной вкладке. Настройка сохранится для следующих ссылок.');
+    status('Выберите два разных стакана на одной вкладке из разных групп связи. Панели их групп переключатся вместе со стаканом. Настройка сохранится для следующих ссылок.');
   } catch (e) { status(`Не удалось проверить: ${e.message}`); }
   finally { $('load').disabled = false; $('instance').disabled = false; }
 };
